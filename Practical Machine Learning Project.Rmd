@@ -1,0 +1,121 @@
+---
+title: "Prediction of Exercise Class"
+author: "Justin Rice"
+---
+###Executive Summary
+This study was commissioned to predict the class of how a subject performed an exercise. The data used for this project was collected from a range of wireless activity wristbands. The wristbands were worn be the subjects as they performed excercies in 5 different ways.
+  To study the data I broke the source data into a training and testing set. I experimented with 2 training models; Decision Tree and Random Forest. The decision tree performed very poorly which is likely to be caused by a lack of homogeneity in the data. We know that random forest is one of the most accurate models and it proved itself here with this data.
+
+###Getting and Cleaning
+```{r setup,message=FALSE, warning=FALSE}
+library(knitr)
+library(dplyr)
+library(plyr)
+library(ggplot2)
+library(gridExtra)
+library(caret)
+library(party)
+#library(e1071) 
+
+set.seed(2016)
+
+#download the data if it doesn't already exist
+if(!file.exists("pml-training.csv")) {
+  trainURL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+  download.file(trainURL, destfile="pml-training.csv")
+}
+
+if(!file.exists("pml-testing.csv")) {
+  trainURL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+  download.file(trainURL, destfile="pml-testing.csv")
+}
+
+#Load the data into R
+  pmlVal <- read.csv("pml-testing.csv")
+  pmlData <- read.csv("pml-training.csv")
+
+#Remove all the columns that include NA values
+NAcols <- colSums(is.na(pmlData)) == 0
+Validcolumns <- sum(NAcols == TRUE)
+pmlData <- pmlData[, NAcols]
+
+
+#Remove columns that are not meaningful predictors
+nzv <- nearZeroVar(pmlData, saveMetrics = T)
+pmlData <- pmlData[, nzv$nzv==F]
+
+#pmlData <- head(pmlData, 1000)
+str(pmlData)
+```
+
+After the data was loaded, it was important to remove the NA columns as they could mislead the results. I also removed the columns that did not contribute any variance to the prediction model.
+
+###Setup Cross-Validation
+```{r crossVal, cache = TRUE}
+partition <- createDataPartition(pmlData$classe, p=0.8, list=F)
+inTrain <- pmlData[partition, ]
+inTest <- pmlData[-partition, ]
+i <- data.frame("Total"=c(nrow(inTrain), nrow(inTest)))
+DT <- matrix(NA, nrow=2, ncol=5)
+TR <- as.data.frame(table(inTrain$classe))
+TE <- as.data.frame(table(inTest$classe))
+DT[1, ] <- TR[,2]
+DT[2, ] <- TE[,2]
+g <- as.data.frame(DT)
+colnames(g) <- c("A", "B", "C", "D", "E")
+e<- cbind(g, i)
+f <- colSums(e)
+r <-  rbind(e, f)
+rownames(r) <- c('Training Data','Testing Data','Total')
+kable(r)
+```
+
+
+This shows the break-down of the outcome variable.
+
+```{r}
+qplot(user_name, data=inTrain, fill=classe)
+```
+
+###Build Decision Tree Model
+In this section 
+```{r tree,message=FALSE, warning=FALSE, cache = TRUE}
+treeFit <- train(classe ~., method="rpart", data=inTrain)
+treePred <- predict(treeFit, newdata=inTest)
+treeMatrix <- confusionMatrix(inTest$classe, treePred)
+treeMatrix$overall['Accuracy']
+treeMatrix$table
+```
+
+###Random Forest
+```{r randomForest,message=FALSE, warning=FALSE, cache = TRUE}
+
+ctrl <- trainControl(allowParallel = T, method="cv", number=4)
+rfFit <- train(classe ~., method="rf", data=inTrain, trControl=ctrl)
+rfPred <- predict(rfFit, newdata=inTest)
+
+rfMatrix <- confusionMatrix(inTest$classe, rfPred) 
+rfMatrix$overall['Accuracy']
+rfMatrix$table
+```
+
+
+
+###Out of Sample Error
+```{r}
+err <- 1-rfMatrix$overall['Accuracy']
+err
+```
+
+The expected Out of Sample Error is 0.02% which is very good for prediction. Therefore we will use the random forest.
+
+###Predict New Data
+```{r predict,message=FALSE, warning=FALSE, cache = TRUE}
+
+pmlVal <- pmlVal[, NAcols]
+pmlVal <- pmlVal[, nzv$nzv==F]
+testing <- pmlVal[, 1:58]
+
+testPred <- predict(rfFit, newdata=testing)
+
+```
